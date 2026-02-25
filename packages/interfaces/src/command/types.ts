@@ -20,7 +20,8 @@ export type MQLCommand =
   | ListDatabasesCommand
   | ListCollectionsCommand
   | ListIndexesCommand
-  | DropDatabaseCommand;
+  | DropDatabaseCommand
+  | DbStatsCommand;
 
 export type CreateCommand = {
   command: 'create';
@@ -37,6 +38,11 @@ export type DropCommand = {
 
 export type DropDatabaseCommand = {
   command: 'dropDatabase';
+  database: string;
+};
+
+export type DbStatsCommand = {
+  command: 'dbStats';
   database: string;
 };
 

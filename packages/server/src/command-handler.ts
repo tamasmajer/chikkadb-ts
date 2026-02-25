@@ -7,6 +7,7 @@ import os from 'os';
 import debug from "debug";
 import { startupOptions } from "./config.js";
 import { getHardcodedResponse } from "./hard-coded-responses.js";
+import { getCollStatsResponse, getDbStatsResponse } from "./compass-stats.js";
 
 const processId = new ObjectId();
 
@@ -109,8 +110,17 @@ export async function handleOpMsg(payload: OpMsgPayload): Promise<OpMsgPayload |
     case 'connectionStatus':
     case 'hostInfo':
       return getHardcodedResponse(command);
+    case 'dbStats':
+      return getDbStatsResponse(command.database, startupOptions.dbpath);
   }
 
+  // Intercept Compass $collStats aggregate pipeline
+  if (command.command === 'aggregate') {
+    const rawDoc = (sections[0] as Extract<OpMsgPayloadSection, { sectionKind: 0 }>).document;
+    if (rawDoc.pipeline?.[0]?.['$collStats'] !== undefined) {
+      return getCollStatsResponse(command.database, String(command.collection), startupOptions.dbpath);
+    }
+  }
 
   const queryIR = generateQueryIRFromCommand(command);
   const resultIR = executeQueryIR(queryIR, startupOptions.dbpath);
@@ -356,6 +366,13 @@ function getCommandFromOpMsgBody(
         nameOnly: document.nameOnly,
       };
     }
+
+    case 'dbStats': {
+      return {
+        command: 'dbStats',
+        database: document.$db,
+      };
+    }
   }
 }
 
@@ -383,4 +400,5 @@ const MONGODB_COMMANDS = [
   'listIndexes',
   'drop',
   'dropDatabase',
+  'dbStats',
 ] as const;
