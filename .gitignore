@@ -4,3 +4,6 @@ node_modules
 data
 *.hex
 _playground
+*.pem
+debug.log
+PLAN_TLS_AUTH.md
