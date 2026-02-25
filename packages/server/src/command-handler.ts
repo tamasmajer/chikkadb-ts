@@ -8,6 +8,9 @@ import debug from "debug";
 import { startupOptions } from "./config.js";
 import { getHardcodedResponse } from "./hard-coded-responses.js";
 import { getCollStatsResponse, getDbStatsResponse } from "./compass-stats.js";
+import type { ConnState } from "./connection.js";
+import type { Credential } from "./auth/credential.js";
+import { handleSaslStart, handleSaslContinue } from "./auth/handlers.js";
 
 const processId = new ObjectId();
 
@@ -15,7 +18,16 @@ const logCommandResult = debug('command:result');
 const logCommandMQL = debug('command:mql');
 const logCommandIR = debug('command:ir');
 
-export async function getResponse(message: WireMessage): Promise<WireMessage> {
+// Commands allowed before authentication
+const PRE_AUTH_COMMANDS = new Set([
+  'hello', 'ismaster', 'saslStart', 'saslContinue', 'ping', 'buildInfo', 'getParameter',
+]);
+
+export async function getResponse(
+  message: WireMessage,
+  connState: ConnState,
+  credential: Credential | null,
+): Promise<WireMessage> {
   const { header, payload } = message;
   const { opCode, requestID } = header;
 
@@ -59,7 +71,7 @@ export async function getResponse(message: WireMessage): Promise<WireMessage> {
       },
     }
   } else if (opCode === 2013) {
-    const responsePayload = await handleOpMsg(payload as OpMsgPayload);
+    const responsePayload = await handleOpMsg(payload as OpMsgPayload, connState, credential);
     logCommandResult(responsePayload);
     if (responsePayload) {
       return {
@@ -74,13 +86,45 @@ export async function getResponse(message: WireMessage): Promise<WireMessage> {
   throw new Error('Unknown opcode: ' + opCode);
 }
 
-export async function handleOpMsg(payload: OpMsgPayload): Promise<OpMsgPayload | undefined> {
+export async function handleOpMsg(
+  payload: OpMsgPayload,
+  connState: ConnState,
+  credential: Credential | null,
+): Promise<OpMsgPayload | undefined> {
   const { sections } = payload;
+  const rawDoc = (sections[0] as Extract<OpMsgPayloadSection, { sectionKind: 0 }>).document;
+  const commandName = Object.keys(rawDoc)[0] as string;
+
+  // Handle SASL auth commands directly (before MQL parsing)
+  if (commandName === 'saslStart' && credential) {
+    return handleSaslStart(rawDoc, connState, credential);
+  }
+  if (commandName === 'saslContinue' && credential) {
+    return handleSaslContinue(rawDoc, connState, credential);
+  }
+
+  // Auth gate: reject non-whitelisted commands from unauthenticated connections
+  if (!connState.authenticated && !PRE_AUTH_COMMANDS.has(commandName)) {
+    return {
+      _type: 'OP_MSG',
+      flagBits: 0,
+      sections: [{
+        sectionKind: 0,
+        document: {
+          ok: 0,
+          errmsg: 'Command requires authentication',
+          code: 13,
+          codeName: 'Unauthorized',
+        },
+      }],
+    };
+  }
+
   const command = getCommandFromOpMsgBody(
     sections[0] as Extract<OpMsgPayloadSection, { sectionKind: 0 }>,
     sections.slice(0) as Extract<OpMsgPayloadSection, { sectionKind: 1 }>[]
   );
-  
+
   if (!command) {
     return {
       _type: 'OP_MSG',
@@ -90,7 +134,7 @@ export async function handleOpMsg(payload: OpMsgPayload): Promise<OpMsgPayload |
           sectionKind: 0,
           document: {
             ok: 0,
-            errmsg: `No such command: '${Object.keys((sections[0] as Extract<OpMsgPayloadSection, { sectionKind: 0 }>).document)[0]}'`,
+            errmsg: `No such command: '${commandName}'`,
             code: 59,
             codeName: 'CommandNotFound',
           },
@@ -116,32 +160,45 @@ export async function handleOpMsg(payload: OpMsgPayload): Promise<OpMsgPayload |
 
   // Intercept Compass $collStats aggregate pipeline
   if (command.command === 'aggregate') {
-    const rawDoc = (sections[0] as Extract<OpMsgPayloadSection, { sectionKind: 0 }>).document;
     if (rawDoc.pipeline?.[0]?.['$collStats'] !== undefined) {
       return getCollStatsResponse(command.database, String(command.collection), startupOptions.dbpath);
     }
   }
 
-  const queryIR = generateQueryIRFromCommand(command);
-  const resultIR = executeQueryIR(queryIR, startupOptions.dbpath);
+  try {
+    const queryIR = generateQueryIRFromCommand(command);
+    const resultIR = executeQueryIR(queryIR, startupOptions.dbpath);
 
-  delete resultIR['_type'];
+    delete resultIR['_type'];
 
-  // TODO: Define strict types for responses of specific commands
+    logCommandResult(resultIR);
 
-  logCommandResult(resultIR);
-  
-
-  return {
-    _type: 'OP_MSG',
-    flagBits: 0,
-    sections: [
-      {
+    return {
+      _type: 'OP_MSG',
+      flagBits: 0,
+      sections: [
+        {
+          sectionKind: 0,
+          document: resultIR,
+        }
+      ]
+    };
+  } catch (error: any) {
+    console.error(`Command error (${commandName}):`, error.message);
+    return {
+      _type: 'OP_MSG',
+      flagBits: 0,
+      sections: [{
         sectionKind: 0,
-        document: resultIR,
-      }
-    ]
-  };
+        document: {
+          ok: 0,
+          errmsg: error.message,
+          code: 2,
+          codeName: 'BadValue',
+        },
+      }],
+    };
+  }
 }
 
 function getCommandFromOpMsgBody(
@@ -149,7 +206,7 @@ function getCommandFromOpMsgBody(
   additionalSections: Extract<OpMsgPayloadSection, { sectionKind: 1 }>[]
 ): MQLCommand | undefined {
   const commandType = MONGODB_COMMANDS.find(cmd => cmd === Object.keys(body.document)[0]);
-  
+
   if (!commandType) return undefined;
 
   const { document } = body;
@@ -181,7 +238,7 @@ function getCommandFromOpMsgBody(
         collection: document.aggregate,
         pipeline: document.pipeline.map((s: Record<string, any>) => {
           const stage = Object.keys(s)[0];
-          
+
           switch(stage) {
             case '$match': {
               return {
@@ -325,7 +382,7 @@ function getCommandFromOpMsgBody(
         updates: document.updates,
       };
     }
-    
+
     case 'findAndModify': {
       return {
         command: 'findAndModify',
