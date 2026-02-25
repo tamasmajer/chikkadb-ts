@@ -96,9 +96,10 @@ function decodeOpMsgPayload(buf: Buffer): OpMsgPayload {
   const flagBits = buf.readInt32LE(pointer);
   pointer += 4;
 
-  const sections = decodeOpMsgPayloadSections(buf, pointer);
+  // Checksum bit is 2^16 = 65536
+  const hasChecksum = (flagBits & 65536) !== 0;
 
-  // Skip the optional checksum
+  const sections = decodeOpMsgPayloadSections(buf, pointer, hasChecksum);
 
   return {
     _type: 'OP_MSG',
@@ -107,11 +108,13 @@ function decodeOpMsgPayload(buf: Buffer): OpMsgPayload {
   }
 }
 
-function decodeOpMsgPayloadSections(buf: Buffer, offset: number): OpMsgPayloadSection[] {
+function decodeOpMsgPayloadSections(buf: Buffer, offset: number, hasChecksum: boolean): OpMsgPayloadSection[] {
   const sections: OpMsgPayloadSection[] = [];
   let pointer = offset;
 
-  while (pointer < buf.length) {
+  const endOffset = hasChecksum ? buf.length - 4 : buf.length;
+
+  while (pointer < endOffset) {
     const sectionKind = buf.readUint8(pointer);
     pointer += 1;
 
