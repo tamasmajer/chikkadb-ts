@@ -55,7 +55,7 @@ function parseProjectionElement(
           parentNodeArr = child.children;
         }
       }
-    } else {
+    } else if (!!value && typeof value === 'object' && !Object.keys(value).some(k => k.startsWith('$'))) {
       for (const [k, v] of Object.entries(value)) {
         const error = parseProjectionElement(k, v, {
           parentPath: parentPath.concat(pathSegments),
@@ -65,6 +65,7 @@ function parseProjectionElement(
         if (error) throw error;
       }
     }
+    // Silently skip unsupported projection expressions ($meta, etc.)
 
     return null;
   } catch (error) {
