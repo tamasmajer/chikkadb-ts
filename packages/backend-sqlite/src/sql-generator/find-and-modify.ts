@@ -16,10 +16,11 @@ export function generateAndExecuteSQL_FindAndModify(command: FindAndModifyComman
   const result = stmt.get();
 
   logSqlResult(result);
+  const doc = (result as any)?.doc;
   return {
     _type: 'findAndModify',
     ok: 1,
-    value: parseFromCustomJSON((result as any)?.doc),
+    value: doc != null ? parseFromCustomJSON(doc) : null,
   };
 }
 
