@@ -23,13 +23,18 @@ async function handleNewConnection(sock: Socket) {
   const bufHolder = { buf: Buffer.alloc(0) };
 
   sock.on('data', async (data) => {
-    bufHolder.buf = Buffer.concat([bufHolder.buf, data]);
-    const messages = processBuffer(bufHolder);
-    for (const message of messages) {
-      logWireMsg(`C -> S message`, message.header);
-      logWireMsg('%O', message.payload);
-      const responseBuf = await getEncodedResponse(message);
-      sock.write(responseBuf);
+    try {
+      bufHolder.buf = Buffer.concat([bufHolder.buf, data]);
+      const messages = processBuffer(bufHolder);
+      for (const message of messages) {
+        logWireMsg(`C -> S message`, message.header);
+        logWireMsg('%O', message.payload);
+        const responseBuf = await getEncodedResponse(message);
+        sock.write(responseBuf);
+      }
+    } catch (error) {
+      console.error('Error processing message:', error);
+      sock.destroy();
     }
   });
 
