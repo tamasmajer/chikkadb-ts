@@ -7,6 +7,7 @@ This is a fork of [chikkadb-ts](https://github.com/athkishore/chikkadb-ts) with 
 - **`main`** — tracks upstream. Not modified directly.
 - **`dev`** — integration branch. Feature branches merge here.
 - **`fix/*`** — individual fix branches merged into `dev`.
+- **`feat/*`** — feature branches merged into `dev`.
 
 ## Changes
 
@@ -29,3 +30,20 @@ Compass could connect and list collections but not display their documents. Thre
 3. **No error handling in socket handler:** Any unhandled error during message processing (unsupported command, parse failure, etc.) crashed the entire server process, dropping all connections.
 
    **Fix:** Wrap the socket data handler in try-catch. Errors are logged and the affected connection is closed; the server stays alive.
+
+### feat/tls-auth — TLS encryption and SCRAM-SHA-256 authentication
+Enable secure remote access from MongoDB Compass and Node.js drivers without needing an SSH tunnel. A single fixed credential is configured via CLI args — no user management.
+
+**Connection string:** `mongodb://admin:secret@host:27018/?tls=true&tlsAllowInvalidCertificates=true`
+
+1. **TLS support:** `--tls`, `--tlsCert <path>`, `--tlsKey <path>` flags wrap the TCP server in `tls.createServer`. Without these flags, behaves as before (plain TCP).
+
+2. **SCRAM-SHA-256 auth:** `--authUser <user>`, `--authPass <pass>` flags enable MongoDB's standard authentication handshake. At startup, the password is hashed via PBKDF2 and stored in memory. The SCRAM conversation (saslStart/saslContinue) follows RFC 5802. Only whitelisted commands (hello, ismaster, ping, buildInfo, getParameter) are allowed before authentication.
+
+3. **Graceful command error handling:** Previously, any command-level error (e.g. unsupported `$type` operator) propagated to the socket handler and called `sock.destroy()`, killing the connection pool. Now errors in command execution are caught and returned as proper MongoDB error responses (`{ ok: 0, errmsg, code }`) while keeping the socket alive.
+
+4. **findAndModify null doc fix:** `findAndModify` crashed with `"undefined" is not valid JSON` when the query matched no rows. Now returns `{ ok: 1, value: null }` as MongoDB does.
+
+**New files:** `auth/credential.ts`, `auth/scram.ts`, `auth/handlers.ts`, `connection.ts`
+
+**Known limitation:** Compass document editing requires docs to have an explicit `_id` field. ChikkaDB does not auto-generate ObjectIds on insert like MongoDB, so Compass sends `_id: null` in the filter and the update matches nothing.
