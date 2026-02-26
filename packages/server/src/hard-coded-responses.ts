@@ -1,9 +1,6 @@
 import type { MQLCommand } from "@chikkadb/interfaces/command/types";
 import type { OpMsgPayload } from "@chikkadb/interfaces/wire/types";
-import { ObjectId } from "bson";
 import os from 'os';
-
-const processId = new ObjectId();
 
 export function getHardcodedResponse(command: MQLCommand): OpMsgPayload {
   switch(command.command) {
@@ -90,10 +87,6 @@ export function getHardcodedResponse(command: MQLCommand): OpMsgPayload {
             sectionKind: 0,
             document: {
               isWritablePrimary: true,
-              topologyVersion: {
-                processId,
-                counter: 0n,
-              },
               maxBsonObjectSize: 16777216,
               maxMessageSizeBytes: 48000000,
               maxWriteBatchSize: 100000,
@@ -119,10 +112,6 @@ export function getHardcodedResponse(command: MQLCommand): OpMsgPayload {
             sectionKind: 0,
             document: {
               ismaster: true,
-              topologyVersion: {
-                processId,
-                counter: 0n,
-              },
               maxBsonObjectSize: 16777216,
               maxMessageSizeBytes: 48000000,
               maxWriteBatchSize: 100000,

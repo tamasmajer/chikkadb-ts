@@ -2,8 +2,6 @@ import { executeQueryIR } from "@chikkadb/backend-sqlite";
 import { generateQueryIRFromCommand } from '@chikkadb/command-parser';
 import type { OpMsgPayload, OpMsgPayloadSection, WireMessage } from "@chikkadb/interfaces/wire/types";
 import type { CommandResponse, MQLCommand } from "@chikkadb/interfaces/command/types";
-import { ObjectId } from "bson";
-import os from 'os';
 import debug from "debug";
 import { startupOptions } from "./config.js";
 import { getHardcodedResponse } from "./hard-coded-responses.js";
@@ -12,7 +10,6 @@ import type { ConnState } from "./connection.js";
 import type { Credential } from "./auth/credential.js";
 import { handleSaslStart, handleSaslContinue } from "./auth/handlers.js";
 
-const processId = new ObjectId();
 
 const logCommandResult = debug('command:result');
 const logCommandMQL = debug('command:mql');
@@ -52,10 +49,6 @@ export async function getResponse(
           {
             helloOk: true,
             ismaster: true,
-            topologyVersion: {
-              processId,
-              counter: 0n,
-            },
             maxBsonObjectSize: 16777216,
             maxMessageSizeBytes: 48000000,
             maxWriteBatchSize: 100000,
